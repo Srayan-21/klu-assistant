@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.streamlit/
+.vscode/
+cloudflared.exe
+app.py
+app_improved.py
+chat_history.json
+history.json
+config.py
+utils.py
+requirements.txt
+*.exe
