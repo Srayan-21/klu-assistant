@@ -1,0 +1,897 @@
+/* ═══════════════════════════════════════════════════════
+   KLU SMART ASSISTANT — APP ENGINE v2.0
+   ═══════════════════════════════════════════════════════ */
+
+// ─── PHYSICS-BASED PAPER ANIMATION ──────────────────
+function initPaperPhysics() {
+    const canvas = document.getElementById('particleCanvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; };
+    resize();
+    window.addEventListener('resize', resize);
+
+    const GRAVITY = 0.03;
+    const AIR_RESISTANCE = 0.995;
+    const ANGULAR_DAMPING = 0.98;
+    const NUM_PAPERS = 10;
+
+    let wind = { x: 0.3, y: 0 };
+    let windTarget = { x: 0.3, y: 0 };
+    let windTimer = 0;
+
+    const paperColors = [
+        'rgba(255,255,255,0.07)',
+        'rgba(200,220,255,0.06)',
+        'rgba(180,200,240,0.05)',
+        'rgba(220,210,255,0.06)',
+        'rgba(200,230,220,0.05)',
+    ];
+
+    class Paper {
+        constructor() {
+            this.w = 30 + Math.random() * 40;
+            this.h = this.w * (1.2 + Math.random() * 0.4);
+            this.mass = 0.5 + Math.random() * 1.0;
+            this.color = paperColors[Math.floor(Math.random() * paperColors.length)];
+            this.borderColor = 'rgba(255,255,255,0.08)';
+            this.reset(true);
+        }
+
+        reset(initial) {
+            if (initial) {
+                this.x = Math.random() * canvas.width;
+                this.y = Math.random() * canvas.height;
+            } else {
+                const edge = Math.floor(Math.random() * 4);
+                if (edge === 0) { this.x = -this.w; this.y = Math.random() * canvas.height; }
+                else if (edge === 1) { this.x = canvas.width + this.w; this.y = Math.random() * canvas.height; }
+                else if (edge === 2) { this.x = Math.random() * canvas.width; this.y = -this.h; }
+                else { this.x = Math.random() * canvas.width; this.y = canvas.height + this.h; }
+            }
+            this.vx = (Math.random() - 0.5) * 0.5;
+            this.vy = (Math.random() - 0.5) * 0.3;
+            this.angle = Math.random() * Math.PI * 2;
+            this.angularVel = (Math.random() - 0.5) * 0.02;
+            this.flutter = Math.random() * Math.PI * 2;
+            this.flutterSpeed = 0.01 + Math.random() * 0.02;
+            this.flutterAmp = 0.3 + Math.random() * 0.5;
+        }
+
+        update() {
+            // Gravity
+            this.vy += GRAVITY / this.mass;
+
+            // Wind force (varies by rotation — simulates aerodynamics)
+            const windEffect = Math.abs(Math.cos(this.angle));
+            this.vx += (wind.x * windEffect * 0.02) / this.mass;
+            this.vy += (wind.y * windEffect * 0.01) / this.mass;
+
+            // Flutter (lateral oscillation — simulates paper tumbling)
+            this.flutter += this.flutterSpeed;
+            this.vx += Math.sin(this.flutter) * this.flutterAmp * 0.005;
+
+            // Air resistance
+            this.vx *= AIR_RESISTANCE;
+            this.vy *= AIR_RESISTANCE;
+
+            // Angular velocity from velocity differential
+            this.angularVel += (this.vx * 0.001 - this.angularVel * 0.01);
+            this.angularVel *= ANGULAR_DAMPING;
+
+            // Update position
+            this.x += this.vx;
+            this.y += this.vy;
+            this.angle += this.angularVel;
+
+            // Respawn if way off screen
+            const margin = 150;
+            if (this.x < -margin || this.x > canvas.width + margin ||
+                this.y < -margin || this.y > canvas.height + margin) {
+                this.reset(false);
+            }
+        }
+
+        draw(ctx) {
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            ctx.rotate(this.angle);
+
+            // 3D perspective: scale based on "depth" of rotation
+            const depth = Math.abs(Math.cos(this.flutter * 0.5));
+            const scaleX = 0.6 + depth * 0.4;
+
+            ctx.scale(scaleX, 1);
+
+            // Paper shadow
+            ctx.fillStyle = 'rgba(0,0,0,0.03)';
+            ctx.fillRect(-this.w / 2 + 3, -this.h / 2 + 3, this.w, this.h);
+
+            // Paper body
+            ctx.fillStyle = this.color;
+            ctx.fillRect(-this.w / 2, -this.h / 2, this.w, this.h);
+
+            // Paper border
+            ctx.strokeStyle = this.borderColor;
+            ctx.lineWidth = 0.5;
+            ctx.strokeRect(-this.w / 2, -this.h / 2, this.w, this.h);
+
+            // Subtle line on paper
+            ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+            ctx.lineWidth = 0.3;
+            for (let i = 1; i < 4; i++) {
+                const ly = -this.h / 2 + (this.h * i / 4);
+                ctx.beginPath();
+                ctx.moveTo(-this.w / 2 + 4, ly);
+                ctx.lineTo(this.w / 2 - 4, ly);
+                ctx.stroke();
+            }
+
+            // Fold/crease effect
+            ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+            ctx.lineWidth = 0.3;
+            ctx.beginPath();
+            ctx.moveTo(-this.w / 2, -this.h / 2);
+            ctx.lineTo(this.w * 0.1 - this.w / 2, this.h * 0.1 - this.h / 2);
+            ctx.stroke();
+
+            ctx.restore();
+        }
+    }
+
+    const papers = [];
+    for (let i = 0; i < NUM_PAPERS; i++) papers.push(new Paper());
+
+    function animate() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Update wind with gusts
+        windTimer++;
+        if (windTimer > 200 + Math.random() * 300) {
+            windTarget.x = (Math.random() - 0.3) * 1.5;
+            windTarget.y = (Math.random() - 0.5) * 0.3;
+            windTimer = 0;
+        }
+        wind.x += (windTarget.x - wind.x) * 0.005;
+        wind.y += (windTarget.y - wind.y) * 0.005;
+
+        // Sort papers by "depth" for layering
+        papers.sort((a, b) => Math.cos(a.flutter) - Math.cos(b.flutter));
+
+        papers.forEach(p => {
+            p.update();
+            p.draw(ctx);
+        });
+
+        requestAnimationFrame(animate);
+    }
+    animate();
+}
+
+// ─── TOAST NOTIFICATION SYSTEM ────────────────
+function showToast(type, title, message) {
+    const container = document.getElementById('toastContainer');
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    const icons = { info: '💡', success: '✅', warning: '⚠️', danger: '🚨' };
+    toast.innerHTML = `
+        <span class="toast-icon">${icons[type] || '💡'}</span>
+        <div class="toast-body">
+            <div class="toast-title">${title}</div>
+            <div class="toast-msg">${message}</div>
+        </div>
+        <button class="toast-close" onclick="this.parentElement.classList.add('exit'); setTimeout(()=>this.parentElement.remove(),300)">✕</button>
+        <div class="toast-progress"></div>
+    `;
+    container.appendChild(toast);
+    addNotification(icons[type] || '💡', title, message);
+    setTimeout(() => { if (toast.parentElement) { toast.classList.add('exit'); setTimeout(() => toast.remove(), 300); } }, 5000);
+}
+
+// ─── NOTIFICATION BELL ────────────────────────
+let notifications = [];
+function addNotification(icon, text, detail) {
+    notifications.unshift({ icon, text, detail, time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) });
+    if (notifications.length > 20) notifications.pop();
+    updateNotifUI();
+}
+function updateNotifUI() {
+    const countEl = document.getElementById('notifCount');
+    const listEl = document.getElementById('notifList');
+    if (countEl) countEl.textContent = Math.min(notifications.length, 9) + (notifications.length > 9 ? '+' : '');
+    if (listEl) {
+        listEl.innerHTML = notifications.length === 0
+            ? '<p style="text-align:center; color: var(--text-secondary); padding: 20px;">No notifications yet</p>'
+            : notifications.map(n => `
+                <div class="notif-item">
+                    <span class="ni-icon">${n.icon}</span>
+                    <span class="ni-text">${n.text}</span>
+                    <span class="ni-time">${n.time}</span>
+                </div>
+            `).join('');
+    }
+}
+function toggleNotifDropdown() {
+    document.getElementById('notifDropdown')?.classList.toggle('show');
+}
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('.notif-wrapper')) document.getElementById('notifDropdown')?.classList.remove('show');
+    if (!e.target.closest('.theme-wrapper')) document.getElementById('themeDropdown')?.classList.remove('show');
+});
+
+// ─── CONFETTI ─────────────────────────────────
+function fireConfetti() {
+    const colors = ['var(--accent)', '#00ffaa', '#8b5cf6', '#ec4899', '#f59e0b', '#ef4444'];
+    for (let i = 0; i < 80; i++) {
+        const piece = document.createElement('div');
+        piece.className = 'confetti-piece';
+        piece.style.left = Math.random() * 100 + 'vw';
+        piece.style.top = '-10px';
+        piece.style.background = colors[Math.floor(Math.random() * colors.length)];
+        piece.style.borderRadius = Math.random() > 0.5 ? '50%' : '2px';
+        piece.style.width = (Math.random() * 8 + 5) + 'px';
+        piece.style.height = (Math.random() * 8 + 5) + 'px';
+        piece.style.animationDuration = (Math.random() * 1.5 + 1.5) + 's';
+        piece.style.animationDelay = Math.random() * 0.5 + 's';
+        document.body.appendChild(piece);
+        setTimeout(() => piece.remove(), 3000);
+    }
+}
+
+// ─── LOGIN SYSTEM ─────────────────────────────
+function initLogin() {
+    const overlay = document.getElementById('loginOverlay');
+    const form = document.getElementById('loginForm');
+    const errorEl = document.getElementById('loginError');
+    const saved = localStorage.getItem('klu_user');
+    if (saved) { showApp(JSON.parse(saved)); return; }
+
+    form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const name = document.getElementById('loginName').value.trim();
+        const id = document.getElementById('loginId').value.trim();
+        if (!name || !id) {
+            errorEl.style.display = 'block'; errorEl.textContent = 'Please fill in all fields';
+            document.querySelector('.login-card').classList.add('shake');
+            setTimeout(() => document.querySelector('.login-card').classList.remove('shake'), 500);
+            return;
+        }
+        const user = { name, id };
+        const remember = document.getElementById('rememberMe')?.checked;
+        if (remember) localStorage.setItem('klu_user', JSON.stringify(user));
+        fireConfetti();
+        setTimeout(() => showApp(user), 600);
+    });
+
+    // Ripple effect on login button
+    document.querySelector('.login-btn')?.addEventListener('click', function (e) {
+        const ripple = document.createElement('span');
+        ripple.className = 'ripple';
+        const rect = this.getBoundingClientRect();
+        ripple.style.left = (e.clientX - rect.left) + 'px';
+        ripple.style.top = (e.clientY - rect.top) + 'px';
+        this.appendChild(ripple);
+        setTimeout(() => ripple.remove(), 600);
+    });
+}
+
+function showApp(user) {
+    document.getElementById('loginOverlay').classList.add('hidden');
+    document.querySelector('.app-wrapper').classList.add('active');
+    const avatar = document.getElementById('userAvatar');
+    const nameEl = document.getElementById('userName');
+    const idEl = document.getElementById('userId');
+    if (avatar) avatar.textContent = user.name.charAt(0).toUpperCase();
+    if (nameEl) nameEl.textContent = user.name;
+    if (idEl) idEl.textContent = user.id;
+    document.getElementById('greetingName').textContent = user.name.split(' ')[0];
+    initDashboard();
+    initWeather();
+    initTimetable();
+    initExams();
+    initEvents();
+    initAssignments();
+    startAlertChecker();
+    showToast('success', 'Welcome back!', `Logged in as ${user.name}`);
+}
+
+function logout() {
+    localStorage.removeItem('klu_user');
+    location.reload();
+}
+
+// ─── THEME SYSTEM ─────────────────────────────
+const themes = [
+    { name: 'cyan', label: 'Cyan', color: '#00d4ff' },
+    { name: 'purple', label: 'Purple Night', color: '#a78bfa' },
+    { name: 'emerald', label: 'Emerald', color: '#34d399' },
+    { name: 'sunset', label: 'Sunset', color: '#fb923c' },
+    { name: 'rose', label: 'Rose', color: '#f472b6' },
+];
+
+function initTheme() {
+    const saved = localStorage.getItem('klu_theme') || 'cyan';
+    setTheme(saved, false);
+    renderThemeSwatches();
+}
+
+function setTheme(name, notify = true) {
+    document.documentElement.setAttribute('data-theme', name);
+    localStorage.setItem('klu_theme', name);
+    // Update active swatch
+    document.querySelectorAll('.theme-swatch').forEach(s => {
+        s.classList.toggle('active', s.dataset.theme === name);
+    });
+    if (notify) showToast('info', '🎨 Theme Changed', `Switched to ${themes.find(t => t.name === name)?.label || name}`);
+}
+
+function renderThemeSwatches() {
+    const container = document.getElementById('themeSwatches');
+    if (!container) return;
+    container.innerHTML = themes.map(t => `
+        <button class="theme-swatch ${t.name === (localStorage.getItem('klu_theme') || 'cyan') ? 'active' : ''}"
+            data-theme="${t.name}" onclick="setTheme('${t.name}')"
+            title="${t.label}" style="--swatch-color: ${t.color}">
+        </button>
+    `).join('');
+}
+
+function toggleThemeDropdown() {
+    document.getElementById('themeDropdown')?.classList.toggle('show');
+}
+
+// ─── NAVIGATION ───────────────────────────────
+function navigate(sectionId) {
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    document.getElementById(sectionId)?.classList.add('active');
+    document.querySelector(`[data-section="${sectionId}"]`)?.classList.add('active');
+    if (sectionId === 'attendance') { calculateLTPS(); calculateBunk(); }
+    // Close mobile sidebar
+    document.querySelector('.sidebar')?.classList.remove('open');
+    document.querySelector('.hamburger')?.classList.remove('active');
+    document.querySelector('.mobile-overlay')?.classList.remove('active');
+}
+function toggleSidebar() {
+    document.querySelector('.sidebar')?.classList.toggle('open');
+    document.querySelector('.hamburger')?.classList.toggle('active');
+    document.querySelector('.mobile-overlay')?.classList.toggle('active');
+}
+
+// ─── DASHBOARD ────────────────────────────────
+const quotes = [
+    { text: "Education is the most powerful weapon which you can use to change the world.", author: "Nelson Mandela" },
+    { text: "The beautiful thing about learning is that no one can take it away from you.", author: "B.B. King" },
+    { text: "Success is not final, failure is not fatal: it is the courage to continue that counts.", author: "Winston Churchill" },
+    { text: "The only way to do great work is to love what you do.", author: "Steve Jobs" },
+    { text: "It does not matter how slowly you go as long as you do not stop.", author: "Confucius" },
+    { text: "Dream big, work hard, stay focused, and surround yourself with good people.", author: "KLU Spirit" },
+    { text: "Your limitation—it's only your imagination.", author: "Unknown" },
+    { text: "Push yourself, because no one else is going to do it for you.", author: "Unknown" },
+];
+
+function initDashboard() {
+    updateClock();
+    setInterval(updateClock, 1000);
+    const hour = new Date().getHours();
+    let greeting = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening';
+    document.getElementById('greetingText').textContent = greeting;
+    const q = quotes[Math.floor(Math.random() * quotes.length)];
+    document.getElementById('quoteText').textContent = `"${q.text}"`;
+    document.getElementById('quoteAuthor').textContent = `— ${q.author}`;
+}
+
+function updateClock() {
+    const now = new Date();
+    const time = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+    const date = now.toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    const clockEl = document.getElementById('liveClock');
+    const dateEl = document.getElementById('liveDate');
+    if (clockEl) clockEl.textContent = time;
+    if (dateEl) dateEl.textContent = date;
+}
+
+// ─── TIMETABLE ────────────────────────────────
+const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const timeSlots = ['9:00', '10:00', '11:00', '12:00', '14:00', '15:00', '16:00'];
+let timetable = JSON.parse(localStorage.getItem('klu_timetable') || '{}');
+
+function initTimetable() { renderTimetable(); }
+
+function renderTimetable() {
+    const grid = document.getElementById('ttGrid');
+    if (!grid) return;
+    let html = '<div class="tt-cell header"></div>';
+    days.forEach(d => html += `<div class="tt-cell header">${d}</div>`);
+    timeSlots.forEach(time => {
+        html += `<div class="tt-cell time-col">${time}</div>`;
+        days.forEach(day => {
+            const key = `${day}_${time}`;
+            const cls = timetable[key];
+            html += `<div class="tt-cell" onclick="openAddClass('${day}','${time}')">
+                ${cls ? `<div class="class-chip" title="Click to edit">${cls}</div>` : ''}
+            </div>`;
+        });
+    });
+    grid.innerHTML = html;
+}
+
+function openAddClass(day, time) {
+    const key = `${day}_${time}`;
+    document.getElementById('modalClassDay').value = day;
+    document.getElementById('modalClassTime').value = time;
+    document.getElementById('modalClassName').value = timetable[key] || '';
+    openModal('addClassModal');
+}
+
+function saveClass() {
+    const day = document.getElementById('modalClassDay').value;
+    const time = document.getElementById('modalClassTime').value;
+    const name = document.getElementById('modalClassName').value.trim();
+    const key = `${day}_${time}`;
+    if (name) timetable[key] = name;
+    else delete timetable[key];
+    localStorage.setItem('klu_timetable', JSON.stringify(timetable));
+    renderTimetable();
+    closeModal('addClassModal');
+    showToast('success', 'Timetable Updated', name ? `Added ${name} on ${day} at ${time}` : `Cleared ${day} ${time}`);
+}
+
+// ─── EXAMS ────────────────────────────────────
+let exams = JSON.parse(localStorage.getItem('klu_exams') || '[]');
+
+function initExams() { renderExams(); }
+
+function renderExams() {
+    const list = document.getElementById('examList');
+    if (!list) return;
+    exams.sort((a, b) => new Date(a.date + 'T' + a.time) - new Date(b.date + 'T' + b.time));
+    if (exams.length === 0) {
+        list.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 30px;">No exams scheduled. Add one above! 📝</p>';
+        return;
+    }
+    list.innerHTML = exams.map((exam, i) => {
+        const examDate = new Date(exam.date + 'T' + exam.time);
+        const now = new Date();
+        const diff = examDate - now;
+        const hours = Math.floor(diff / 3600000);
+        const days = Math.floor(hours / 24);
+        let countdownText = '', urgencyClass = 'safe';
+        if (diff < 0) { countdownText = 'Passed'; urgencyClass = ''; }
+        else if (hours < 3) { countdownText = `${Math.floor(diff / 60000)} min`; urgencyClass = 'urgent'; }
+        else if (hours < 24) { countdownText = `${hours} hrs`; urgencyClass = 'urgent'; }
+        else if (days < 3) { countdownText = `${days}d ${hours % 24}h`; urgencyClass = 'soon'; }
+        else { countdownText = `${days} days`; urgencyClass = 'safe'; }
+        const dateStr = examDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+        return `<div class="exam-item">
+            <div class="exam-date">${dateStr}</div>
+            <div class="exam-info">
+                <div class="exam-name">${exam.name}</div>
+                <div class="exam-time">🕐 ${exam.time} ${exam.room ? '• 📍 ' + exam.room : ''}</div>
+            </div>
+            <div class="exam-countdown ${urgencyClass}">${countdownText}</div>
+            <button class="delete-exam" onclick="deleteExam(${i})">🗑️</button>
+        </div>`;
+    }).join('');
+}
+
+function openAddExam() { openModal('addExamModal'); }
+function saveExam() {
+    const name = document.getElementById('examName').value.trim();
+    const date = document.getElementById('examDate').value;
+    const time = document.getElementById('examTime').value;
+    const room = document.getElementById('examRoom').value.trim();
+    if (!name || !date || !time) { showToast('warning', 'Missing Info', 'Please fill in name, date, and time'); return; }
+    exams.push({ name, date, time, room });
+    localStorage.setItem('klu_exams', JSON.stringify(exams));
+    renderExams();
+    closeModal('addExamModal');
+    showToast('success', 'Exam Added', `${name} on ${date}`);
+    document.getElementById('examName').value = '';
+    document.getElementById('examDate').value = '';
+    document.getElementById('examTime').value = '';
+    document.getElementById('examRoom').value = '';
+}
+function deleteExam(i) {
+    exams.splice(i, 1);
+    localStorage.setItem('klu_exams', JSON.stringify(exams));
+    renderExams();
+}
+
+// ─── 24-HOUR ALERT CHECKER ───────────────────
+let alertedExams = new Set(JSON.parse(localStorage.getItem('klu_alerted') || '[]'));
+
+function startAlertChecker() {
+    checkAlerts();
+    setInterval(checkAlerts, 60000);
+}
+
+function checkAlerts() {
+    const now = new Date();
+    exams.forEach(exam => {
+        const examDate = new Date(exam.date + 'T' + exam.time);
+        const diff = examDate - now;
+        const key = `${exam.name}_${exam.date}_${exam.time}`;
+        // Alert if within 24 hours and not yet alerted
+        if (diff > 0 && diff <= 86400000 && !alertedExams.has(key)) {
+            alertedExams.add(key);
+            localStorage.setItem('klu_alerted', JSON.stringify([...alertedExams]));
+            const hrs = Math.floor(diff / 3600000);
+            const mins = Math.floor((diff % 3600000) / 60000);
+            const timeStr = hrs > 0 ? `${hrs}h ${mins}m` : `${mins} minutes`;
+            showToast('danger', '🚨 Exam Alert!', `"${exam.name}" starts in ${timeStr}! ${exam.room ? 'Room: ' + exam.room : ''}`);
+        }
+    });
+    // Also check assignment deadlines
+    checkAssignmentAlerts(now);
+    renderExams();
+}
+
+// ─── ATTENDANCE CALCULATOR ────────────────────
+// KLU LTPS Weights: L=100, T=25, P=50, S=25
+// Formula: Sum(Component% × Weight) / Sum(ActiveWeights)
+// If a field is empty/0, that component is excluded from both numerator and denominator.
+
+const LTPS_WEIGHTS = { L: 100, T: 25, P: 50, S: 25 };
+
+function switchAttMode(mode) {
+    document.querySelectorAll('.att-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.att-panel').forEach(p => p.style.display = 'none');
+    document.querySelector(`[data-att="${mode}"]`)?.classList.add('active');
+    document.getElementById(mode)?.style && (document.getElementById(mode).style.display = 'block');
+}
+
+function calculateLTPS() {
+    const lVal = document.getElementById('attL').value.trim();
+    const tVal = document.getElementById('attT').value.trim();
+    const pVal = document.getElementById('attP').value.trim();
+    const sVal = document.getElementById('attS').value.trim();
+
+    // Build list of active components (non-empty, non-zero)
+    let numerator = 0;
+    let denominator = 0;
+    let activeComponents = [];
+
+    if (lVal !== '' && parseFloat(lVal) > 0) {
+        const l = parseFloat(lVal);
+        numerator += l * LTPS_WEIGHTS.L;
+        denominator += LTPS_WEIGHTS.L;
+        activeComponents.push(`L:${l}%`);
+    }
+    if (tVal !== '' && parseFloat(tVal) > 0) {
+        const t = parseFloat(tVal);
+        numerator += t * LTPS_WEIGHTS.T;
+        denominator += LTPS_WEIGHTS.T;
+        activeComponents.push(`T:${t}%`);
+    }
+    if (pVal !== '' && parseFloat(pVal) > 0) {
+        const p = parseFloat(pVal);
+        numerator += p * LTPS_WEIGHTS.P;
+        denominator += LTPS_WEIGHTS.P;
+        activeComponents.push(`P:${p}%`);
+    }
+    if (sVal !== '' && parseFloat(sVal) > 0) {
+        const s = parseFloat(sVal);
+        numerator += s * LTPS_WEIGHTS.S;
+        denominator += LTPS_WEIGHTS.S;
+        activeComponents.push(`S:${s}%`);
+    }
+
+    if (denominator === 0) {
+        document.getElementById('ltpsScore').textContent = '—';
+        document.getElementById('ltpsScore').className = 'result-value';
+        document.getElementById('ltpsGap').textContent = '—';
+        document.getElementById('ltpsGap').className = 'result-value';
+        document.getElementById('ltpsStatus').textContent = '—';
+        document.getElementById('ltpsStatus').className = 'result-value';
+        document.getElementById('ltpsActiveInfo').textContent = 'Enter at least one component';
+        updateProgressRing('ltpsRing', 0);
+        return;
+    }
+
+    const score = numerator / denominator;
+    const gap = Math.max(0, 75 - score);
+    const status = score >= 75 ? 'Safe ✅' : score >= 65 ? 'Warning ⚠️' : 'Danger 🚨';
+    const statusClass = score >= 75 ? 'safe' : score >= 65 ? 'warning' : 'danger';
+
+    document.getElementById('ltpsScore').textContent = score.toFixed(1) + '%';
+    document.getElementById('ltpsScore').className = 'result-value ' + statusClass;
+    document.getElementById('ltpsGap').textContent = gap > 0 ? gap.toFixed(1) + '%' : 'None';
+    document.getElementById('ltpsGap').className = 'result-value ' + (gap > 0 ? 'danger' : 'safe');
+    document.getElementById('ltpsStatus').textContent = status;
+    document.getElementById('ltpsStatus').className = 'result-value ' + statusClass;
+    document.getElementById('ltpsActiveInfo').textContent = `Active: ${activeComponents.join(', ')} | Weights: ${denominator}`;
+    updateProgressRing('ltpsRing', score);
+}
+
+function calculateBunk() {
+    const total = parseInt(document.getElementById('totalClasses').value) || 0;
+    const attended = parseInt(document.getElementById('attendedClasses').value) || 0;
+    if (total === 0) return;
+    const current = (attended / total) * 100;
+
+    let bunkable = 0, needClasses = 0;
+    if (current >= 75) {
+        bunkable = Math.floor((attended - 0.75 * total) / 0.75);
+    } else {
+        needClasses = Math.ceil((0.75 * total - attended) / (1 - 0.75));
+    }
+    document.getElementById('bunkCurrent').textContent = current.toFixed(1) + '%';
+    document.getElementById('bunkCurrent').className = 'result-value ' + (current >= 75 ? 'safe' : current >= 65 ? 'warning' : 'danger');
+    const infoEl = document.getElementById('bunkInfo');
+    if (current >= 75) {
+        infoEl.innerHTML = `You can safely skip <span class="bunk-count">${bunkable}</span> more class${bunkable !== 1 ? 'es' : ''} 🎉`;
+    } else {
+        infoEl.innerHTML = `You need to attend <span class="bunk-count">${needClasses}</span> more class${needClasses !== 1 ? 'es' : ''} to reach 75% 📚`;
+    }
+    updateProgressRing('bunkRing', current);
+    const planned = parseInt(document.getElementById('plannedAbsences').value) || 0;
+    const projected = total + planned > 0 ? (attended / (total + planned)) * 100 : 0;
+    document.getElementById('projectedAtt').textContent = projected.toFixed(1) + '%';
+    document.getElementById('projectedAtt').className = 'result-value ' + (projected >= 75 ? 'safe' : projected >= 65 ? 'warning' : 'danger');
+}
+
+function updateProgressRing(id, value) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const circumference = 2 * Math.PI * 72;
+    const offset = circumference - (Math.min(value, 100) / 100) * circumference;
+    const color = value >= 75 ? 'var(--accent2)' : value >= 65 ? '#f59e0b' : '#ef4444';
+    const fill = el.querySelector('.ring-fill');
+    const percentText = el.querySelector('.ring-percent');
+    if (fill) { fill.style.strokeDashoffset = offset; fill.style.stroke = color; }
+    if (percentText) { percentText.textContent = value.toFixed(1) + '%'; percentText.style.color = color; }
+}
+
+// ─── ASSIGNMENTS ──────────────────────────────
+let assignments = JSON.parse(localStorage.getItem('klu_assignments') || '[]');
+
+function initAssignments() { renderAssignments(); }
+
+function renderAssignments() {
+    const list = document.getElementById('assignmentList');
+    if (!list) return;
+
+    // Sort: undone first (by due date), then done
+    assignments.sort((a, b) => {
+        if (a.done !== b.done) return a.done ? 1 : -1;
+        return new Date(a.dueDate + 'T' + (a.dueTime || '23:59')) - new Date(b.dueDate + 'T' + (b.dueTime || '23:59'));
+    });
+
+    if (assignments.length === 0) {
+        list.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 30px;">No assignments yet. Add one above! 📝</p>';
+        return;
+    }
+
+    list.innerHTML = assignments.map((a, i) => {
+        const due = new Date(a.dueDate + 'T' + (a.dueTime || '23:59'));
+        const now = new Date();
+        const diff = due - now;
+        const hours = Math.floor(diff / 3600000);
+        const days = Math.floor(hours / 24);
+
+        let countdownText = '', urgencyClass = 'safe';
+        if (a.done) { countdownText = 'Done ✓'; urgencyClass = 'done'; }
+        else if (diff < 0) { countdownText = 'Overdue!'; urgencyClass = 'urgent'; }
+        else if (hours < 6) { countdownText = `${Math.max(0, Math.floor(diff / 60000))} min`; urgencyClass = 'urgent'; }
+        else if (hours < 24) { countdownText = `${hours} hrs`; urgencyClass = 'urgent'; }
+        else if (days < 3) { countdownText = `${days}d ${hours % 24}h`; urgencyClass = 'soon'; }
+        else { countdownText = `${days} days`; urgencyClass = 'safe'; }
+
+        const dateStr = due.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+        const priorityColors = { high: 'urgent', medium: 'soon', low: 'safe' };
+
+        return `<div class="assignment-item ${a.done ? 'completed' : ''}">
+            <button class="assign-check ${a.done ? 'checked' : ''}" onclick="toggleAssignmentDone(${i})">${a.done ? '✓' : ''}</button>
+            <div class="assign-info">
+                <div class="assign-title">${a.title}</div>
+                <div class="assign-meta">
+                    <span class="assign-subject">${a.subject}</span>
+                    <span>📅 ${dateStr} ${a.dueTime ? '• 🕐 ' + a.dueTime : ''}</span>
+                </div>
+            </div>
+            <span class="priority-badge ${priorityColors[a.priority] || 'safe'}">${a.priority || 'low'}</span>
+            <div class="assign-countdown ${urgencyClass}">${countdownText}</div>
+            <button class="delete-exam" onclick="deleteAssignment(${i})">🗑️</button>
+        </div>`;
+    }).join('');
+}
+
+function openAddAssignment() { openModal('addAssignmentModal'); }
+
+function saveAssignment() {
+    const subject = document.getElementById('assignSubject').value.trim();
+    const title = document.getElementById('assignTitle').value.trim();
+    const dueDate = document.getElementById('assignDueDate').value;
+    const dueTime = document.getElementById('assignDueTime').value;
+    const priority = document.getElementById('assignPriority').value;
+    if (!subject || !title || !dueDate) {
+        showToast('warning', 'Missing Info', 'Please fill in subject, title, and due date');
+        return;
+    }
+    assignments.push({ subject, title, dueDate, dueTime, priority, done: false });
+    localStorage.setItem('klu_assignments', JSON.stringify(assignments));
+    renderAssignments();
+    closeModal('addAssignmentModal');
+    showToast('success', 'Assignment Added', `${title} — due ${dueDate}`);
+    // Clear form
+    document.getElementById('assignSubject').value = '';
+    document.getElementById('assignTitle').value = '';
+    document.getElementById('assignDueDate').value = '';
+    document.getElementById('assignDueTime').value = '';
+    document.getElementById('assignPriority').value = 'medium';
+}
+
+function deleteAssignment(i) {
+    assignments.splice(i, 1);
+    localStorage.setItem('klu_assignments', JSON.stringify(assignments));
+    renderAssignments();
+}
+
+function toggleAssignmentDone(i) {
+    assignments[i].done = !assignments[i].done;
+    localStorage.setItem('klu_assignments', JSON.stringify(assignments));
+    renderAssignments();
+    if (assignments[i].done) showToast('success', '🎉 Completed!', `Marked "${assignments[i].title}" as done`);
+}
+
+function checkAssignmentAlerts(now) {
+    assignments.forEach(a => {
+        if (a.done) return;
+        const due = new Date(a.dueDate + 'T' + (a.dueTime || '23:59'));
+        const diff = due - now;
+        const key = `assign_${a.title}_${a.dueDate}`;
+        if (diff > 0 && diff <= 86400000 && !alertedExams.has(key)) {
+            alertedExams.add(key);
+            localStorage.setItem('klu_alerted', JSON.stringify([...alertedExams]));
+            const hrs = Math.floor(diff / 3600000);
+            showToast('warning', '📝 Assignment Due Soon!', `"${a.title}" (${a.subject}) is due in ${hrs > 0 ? hrs + ' hours' : 'less than an hour'}!`);
+        }
+    });
+}
+
+// ─── WEATHER ──────────────────────────────────
+const weatherCodes = {
+    0: { icon: '☀️', desc: 'Clear sky' }, 1: { icon: '🌤️', desc: 'Mainly clear' },
+    2: { icon: '⛅', desc: 'Partly cloudy' }, 3: { icon: '☁️', desc: 'Overcast' },
+    45: { icon: '🌫️', desc: 'Fog' }, 48: { icon: '🌫️', desc: 'Rime fog' },
+    51: { icon: '🌦️', desc: 'Light drizzle' }, 53: { icon: '🌦️', desc: 'Drizzle' },
+    55: { icon: '🌧️', desc: 'Dense drizzle' }, 61: { icon: '🌧️', desc: 'Light rain' },
+    63: { icon: '🌧️', desc: 'Rain' }, 65: { icon: '🌧️', desc: 'Heavy rain' },
+    71: { icon: '🌨️', desc: 'Light snow' }, 73: { icon: '🌨️', desc: 'Snow' },
+    80: { icon: '🌧️', desc: 'Rain showers' }, 81: { icon: '🌧️', desc: 'Heavy showers' },
+    82: { icon: '⛈️', desc: 'Violent showers' }, 95: { icon: '⛈️', desc: 'Thunderstorm' },
+    96: { icon: '⛈️', desc: 'Thunderstorm + hail' }, 99: { icon: '⛈️', desc: 'Heavy thunderstorm' },
+};
+const rainCodes = [51, 53, 55, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99];
+
+async function initWeather() {
+    try {
+        const url = 'https://api.open-meteo.com/v1/forecast?latitude=16.44&longitude=80.62&current_weather=true&hourly=temperature_2m,weathercode,relative_humidity_2m,windspeed_10m&forecast_days=1&timezone=Asia/Kolkata';
+        const res = await fetch(url);
+        const data = await res.json();
+        const cw = data.current_weather;
+        const wInfo = weatherCodes[cw.weathercode] || { icon: '🌡️', desc: 'Unknown' };
+        document.getElementById('weatherTemp').textContent = Math.round(cw.temperature) + '°C';
+        document.getElementById('weatherIcon').textContent = wInfo.icon;
+        document.getElementById('weatherDesc').textContent = wInfo.desc;
+        document.getElementById('weatherWind').textContent = cw.windspeed + ' km/h';
+        const hourIndex = new Date().getHours();
+        const humidity = data.hourly.relative_humidity_2m[hourIndex];
+        document.getElementById('weatherHumidity').textContent = humidity + '%';
+        document.getElementById('weatherFeels').textContent = Math.round(cw.temperature - cw.windspeed * 0.05) + '°C';
+        if (rainCodes.includes(cw.weathercode)) {
+            document.getElementById('rainBanner').classList.add('show');
+            showToast('warning', '🌧️ Rain Alert in KL!', 'It\'s raining in Vaddeswaram! Carry your umbrella ☂️');
+        }
+        const upcomingHours = data.hourly.weathercode.slice(hourIndex, hourIndex + 6);
+        if (!rainCodes.includes(cw.weathercode) && upcomingHours.some(c => rainCodes.includes(c))) {
+            showToast('info', '🌦️ Rain Expected', 'Rain is expected in the next few hours in Vaddeswaram. Carry an umbrella!');
+        }
+        const forecastGrid = document.getElementById('forecastGrid');
+        if (forecastGrid) {
+            let fhtml = '';
+            for (let h = hourIndex; h < Math.min(hourIndex + 8, 24); h++) {
+                const wc = data.hourly.weathercode[h];
+                const wi = weatherCodes[wc] || { icon: '🌡️' };
+                const temp = Math.round(data.hourly.temperature_2m[h]);
+                const timeStr = h.toString().padStart(2, '0') + ':00';
+                fhtml += `<div class="forecast-card card">
+                    <div class="fc-time">${timeStr}</div>
+                    <div class="fc-icon">${wi.icon}</div>
+                    <div class="fc-temp">${temp}°</div>
+                </div>`;
+            }
+            forecastGrid.innerHTML = fhtml;
+        }
+    } catch (err) {
+        document.getElementById('weatherDesc').textContent = 'Unable to load weather data';
+        console.error('Weather fetch error:', err);
+    }
+    setTimeout(initWeather, 1800000);
+}
+
+// ─── FESTS & EVENTS ──────────────────────────
+let events = JSON.parse(localStorage.getItem('klu_events') || 'null') || [
+    { name: 'Samyak 2025', emoji: '🎭', date: '2025-03-15', desc: 'Annual Cultural Fest' },
+    { name: 'Surabhi 2025', emoji: '🎶', date: '2025-04-10', desc: 'Music & Dance Festival' },
+    { name: 'Tech Expo', emoji: '💻', date: '2025-03-28', desc: 'Innovation & Technology' },
+    { name: 'Sports Week', emoji: '🏆', date: '2025-02-20', desc: 'Inter-department Sports' },
+    { name: 'Hackathon', emoji: '⚡', date: '2025-03-20', desc: '24-Hour Coding Challenge' },
+];
+
+function initEvents() {
+    renderEvents();
+    updateCountdown();
+    setInterval(updateCountdown, 1000);
+}
+
+function renderEvents() {
+    const grid = document.getElementById('eventsGrid');
+    if (!grid) return;
+    grid.innerHTML = events.map((ev, i) => {
+        const diff = new Date(ev.date) - new Date();
+        const daysLeft = Math.max(0, Math.ceil(diff / 86400000));
+        return `<div class="event-card card">
+            <div class="event-emoji">${ev.emoji}</div>
+            <div class="event-name">${ev.name}</div>
+            <div class="event-date">📅 ${new Date(ev.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
+            <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 10px;">${ev.desc}</p>
+            <span class="event-countdown-chip">${daysLeft > 0 ? daysLeft + ' days left' : 'Happening now!'}</span>
+        </div>`;
+    }).join('');
+}
+
+function updateCountdown() {
+    const now = new Date();
+    const upcoming = events.filter(e => new Date(e.date) > now).sort((a, b) => new Date(a.date) - new Date(b.date));
+    if (upcoming.length === 0) return;
+    const next = upcoming[0];
+    const diff = new Date(next.date) - now;
+    const d = Math.floor(diff / 86400000);
+    const h = Math.floor((diff % 86400000) / 3600000);
+    const m = Math.floor((diff % 3600000) / 60000);
+    const s = Math.floor((diff % 60000) / 1000);
+    document.getElementById('nextEventName').textContent = next.emoji + ' ' + next.name;
+    document.getElementById('cdDays').textContent = d;
+    document.getElementById('cdHours').textContent = h;
+    document.getElementById('cdMins').textContent = m;
+    document.getElementById('cdSecs').textContent = s;
+}
+
+function openAddEvent() { openModal('addEventModal'); }
+function saveEvent() {
+    const name = document.getElementById('eventNameInput').value.trim();
+    const date = document.getElementById('eventDateInput').value;
+    const desc = document.getElementById('eventDescInput').value.trim();
+    const emoji = document.getElementById('eventEmojiInput').value || '🎉';
+    if (!name || !date) { showToast('warning', 'Missing Info', 'Please fill in name and date'); return; }
+    events.push({ name, date, desc: desc || 'Custom Event', emoji });
+    localStorage.setItem('klu_events', JSON.stringify(events));
+    renderEvents(); updateCountdown();
+    closeModal('addEventModal');
+    showToast('success', 'Event Added', `${name} on ${date}`);
+}
+
+// ─── MODAL HELPERS ────────────────────────────
+function openModal(id) { document.getElementById(id)?.classList.add('active'); }
+function closeModal(id) { document.getElementById(id)?.classList.remove('active'); }
+
+// ─── SCROLL REVEAL ────────────────────────────
+function initScrollReveal() {
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+    }, { threshold: 0.1 });
+    document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+}
+
+// ─── APP INIT ─────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+    initTheme();
+    initPaperPhysics();
+    initLogin();
+    initScrollReveal();
+    document.querySelectorAll('.nav-item').forEach(item => {
+        item.addEventListener('click', () => navigate(item.dataset.section));
+    });
+});
